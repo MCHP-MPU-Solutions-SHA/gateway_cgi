@@ -12,7 +12,7 @@
 
 #include "cgic.h"
 #include "cjson/cJSON.h"
-#include "mosq.h"
+//#include "mosq.h"
 
 typedef unsigned char  uchar;
 typedef unsigned short ushort;
@@ -25,20 +25,16 @@ typedef unsigned long  ulong;
 #define NAME_LEN 10
 
 #define JSON_LIGHTS    "lights"
+#define JSON_ID        "id"
 #define JSON_NAME		   "name"
-#define JSON_MAC		   "mac"
-#define JSON_TOPIC_PUB "topic_publish"
-#define JSON_TOPIC_SUB "topic_subscribe"
+#define JSON_VALID		   "valid"
+#define JSON_LED		   "led"
+#define JSON_TEMPERATURE "temperature"
+#define JSON_RSSI "rssi"
+#define JSON_CLKWISE "clockwise"
+#define JSON_CNTCLKWISE "counterclockwise"
 #define JSON_NAME_LEN	12
-#define JSON_MAC_LEN	12
 
-#define MQTT_HOST       "localhost"
-#define MQTT_PORT	      1883
-#define MQTT_KEEP_ALIVE 60
-#define MQTT_TOPIC_LEN  64
-#define MQTT_TOPIC_PATTERN  "/end_node/%s/sensor_board/%s"
-#define MQTT_TOPIC_CONTROL "data_control"
-#define MQTT_TOPIC_REPORT  "data_report"
 
 char *status[] = {
 	"Off",
@@ -60,7 +56,15 @@ typedef enum flag_t {
 	LIGHT_DELETE,
 	LIGHT_BACK,
 	LIGHT_NAME,
-	LIGHT_MAC
+	LIGHT_LED,
+	LIGHT_TEMP,
+	LIGHT_RSSI,
+	LIGHT_CLKWISE,
+	LIGHT_CNTCLKWISE,
+	LIGHT_CLKWISE_ON,
+	LIGHT_CLKWISE_OFF,
+	LIGHT_CNTCLKWISE_ON,
+	LIGHT_CNTCLKWISE_OFF
 } flag_e;
 
 typedef enum topic_t {
@@ -75,15 +79,17 @@ typedef enum command_t {
 } command_e;
 
 typedef struct light_t {
+	char *id;
 	char *name;
-	char *mac;
-	char *topic_pub;
-	char *topic_sub;
-	int  status;
-	float temp;
-	int  hum;
-	int  uv;
-	mosq_s mosq;
+	char *valid;
+	char *led;
+	char *temperature;
+	char *rssi;
+	char *clockwise;
+	char *counterclockwise;
+	int status;
+	int status1;
+	int status2;
 } light_s;
 
 typedef struct context_t {
@@ -105,7 +111,7 @@ int LoadConfig(context_s *ctx);
 void FreeConfig(context_s *ctx);
 int ReloadConfig(context_s *ctx);
 void ParseReport(void *userdata, const char *report);
-int LightAdd(context_s *ctx, char *name, char *mac);
+int LightAdd(context_s *ctx, char *name, char *led, char *temp, char *rssi, char *clkwise, char *cntclkwise);
 int LightDelete(context_s *ctx, int num);
 char *Names(flag_e flag, int num);
 char *Topics(topic_e flag, char *mac);
@@ -138,9 +144,8 @@ int cgiMain() {
 	/* Top of the page */
 	fprintf(cgiOut, "<HTML><HEAD>\n");
 	fprintf(cgiOut, "<IMG src=\"../logo.png\" alt=\"logo\">\n");
-	fprintf(cgiOut, "<TITLE>HA Gateway</TITLE></HEAD>\n");
-	fprintf(cgiOut, "<BODY><H1>Home Automation</H1>\n");
-	fprintf(cgiOut, "<BODY><H1>Gateway</H1>\n");
+	fprintf(cgiOut, "<TITLE>Mi-Wi Gateway</TITLE></HEAD>\n");
+	fprintf(cgiOut, "<BODY><H1>Mi-Wi IoT Control Center</H1>\n");
 
 	/* Load lights configuration from JSON file */
 	ctx.json = OpenJson(CONFIG_FILE);
@@ -161,15 +166,20 @@ int cgiMain() {
 		pageIndex = PAGE_CONFIG;
 	} else if (cgiFormSubmitClicked(Names(LIGHT_ADD, 0)) == cgiFormSuccess) {
 		char name[JSON_NAME_LEN+1];
-		char mac[JSON_MAC_LEN+1];
+		char led[JSON_NAME_LEN+1];
+		char temp[JSON_NAME_LEN+1];
+		char rssi[JSON_NAME_LEN+1];
+		char clkwise[JSON_NAME_LEN+1];
+		char cntclkwise[JSON_NAME_LEN+1];
 
 		cgiFormString(Names(LIGHT_NAME, 0), name, JSON_NAME_LEN+1);
-		cgiFormString(Names(LIGHT_MAC, 0), mac, JSON_MAC_LEN+1);
-		if (strlen(name) && strlen(mac)) {
-			for (i=0; i<strlen(mac); i++)
-				mac[i] = tolower(mac[i]);
-
-			LightAdd(&ctx, name, mac);
+		cgiFormString(Names(LIGHT_LED, 0), led, JSON_NAME_LEN+1);
+		cgiFormString(Names(LIGHT_TEMP, 0), temp, JSON_NAME_LEN+1);
+		cgiFormString(Names(LIGHT_RSSI, 0), rssi, JSON_NAME_LEN+1);
+		cgiFormString(Names(LIGHT_CLKWISE, 0), clkwise, JSON_NAME_LEN+1);
+		cgiFormString(Names(LIGHT_CNTCLKWISE, 0), cntclkwise, JSON_NAME_LEN+1);
+		if (strlen(name) && strlen(led) && strlen(temp) && strlen(rssi) && strlen(clkwise) && strlen(cntclkwise)) {
+			LightAdd(&ctx, name, led, temp, rssi, clkwise, cntclkwise);
 			SaveJson(CONFIG_FILE, ctx.json);
 			ReloadConfig(&ctx);
 		}
@@ -186,41 +196,17 @@ int cgiMain() {
 		}
 	}
 
-	/* Show the config page */	
+	/* Show the config page */
 	if (pageIndex == PAGE_CONFIG) {
 		ShowConfig(&ctx);
 		goto EXIT2;
 	}
 
-	/* Only status page needs mosquitto function */
-	mosquitto_lib_init();
-	for (i=0; i<ctx.light_num; i++)
-		mosq_init(&(*ctx.lights)[i].mosq, MQTT_HOST, MQTT_PORT, MQTT_KEEP_ALIVE, \
-							(*ctx.lights)[i].topic_pub, (*ctx.lights)[i].topic_sub);
-	/* Check status buttons */
-	for (i=0; i<ctx.light_num; i++) {
-		if (cgiFormSubmitClicked(Names(LIGHT_ON, i)) == cgiFormSuccess) {
-			mosq_publish(&(*ctx.lights)[i].mosq, Commands(CMD_LIGHT_ON), 100);
-			pageIndex = PAGE_STATUS;
-			break;
-		} else if (cgiFormSubmitClicked(Names(LIGHT_OFF, i)) == cgiFormSuccess) {
-			mosq_publish(&(*ctx.lights)[i].mosq, Commands(CMD_LIGHT_OFF), 100);
-			pageIndex = PAGE_STATUS;
-			break;
-		}
-	}
-	/* Update light status */
-	for (i=0; i<ctx.light_num; i++)
-		mosq_sub_start(&(*ctx.lights)[i].mosq, ParseReport, &(*ctx.lights)[i]);
-
-	for (i=0; i<ctx.light_num; i++)
-		mosq_pub_start(&(*ctx.lights)[i].mosq, Commands(CMD_STATUS));
-
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	while (!Timeout(&ts, 200)) {
 		stoped = 0;
 		for (i=0; i<ctx.light_num; i++) {
-			if (!mosq_pub_running(&(*ctx.lights)[i].mosq))
+			//if (!mosq_pub_running(&(*ctx.lights)[i].mosq))
 			stoped++;
 		}
 
@@ -229,14 +215,11 @@ int cgiMain() {
 		usleep(1*1000);
 	}
 
-	for (i=0; i<ctx.light_num; i++)
-		mosq_pub_stop(&(*ctx.lights)[i].mosq);
-
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	while (!Timeout(&ts, 2000)) {
 		stoped = 0;
 		for (i=0; i<ctx.light_num; i++) {
-			if (!mosq_sub_running(&(*ctx.lights)[i].mosq))
+			//if (!mosq_sub_running(&(*ctx.lights)[i].mosq))
 				stoped++;
 		}
 		if (stoped == ctx.light_num)
@@ -244,19 +227,11 @@ int cgiMain() {
 		usleep(1*1000);
 	}
 
-	for (i=0; i<ctx.light_num; i++)
-		mosq_sub_stop(&(*ctx.lights)[i].mosq);
-
-	/* Cleanup mosquitto */
-	for (i=0; i<ctx.light_num; i++)
-		mosq_cleanup(&(*ctx.lights)[i].mosq);
-	mosquitto_lib_cleanup();
-
 	/* Show the status page */
 	if (pageIndex == PAGE_STATUS) {
 		ShowStatus(&ctx);
 	}
-	
+
 EXIT2:
 	FreeConfig(&ctx);
 EXIT1:
@@ -265,7 +240,7 @@ EXIT:
 	/* Show processing time */
 	clock_gettime(CLOCK_MONOTONIC, &ts2);
 	ctx.us = (ts2.tv_sec - ts1.tv_sec)*1000000 + (ts2.tv_nsec - ts1.tv_nsec)/1000;
-	fprintf(cgiOut, "<i>time %d.%dms</i>\n", ctx.us/1000, ctx.us%1000);
+	//fprintf(cgiOut, "<i>time %d.%dms</i>\n", ctx.us/1000, ctx.us%1000);
 	/* Finish up the page */
 	fprintf(cgiOut, "</BODY></HTML>\n");
 	return 0;
@@ -363,7 +338,7 @@ int SaveJson(char *file, cJSON *json)
 int LoadConfig(context_s *ctx)
 {
 	int i;
-	cJSON *json_lights, *json_light, *json_name, *json_mac, *json_topic_pub, *json_topic_sub;
+	cJSON *json_lights, *json_light, *json_id, *json_name, *json_valid, *json_led, *json_temp, *json_rssi, *json_clkwise, *json_cntclkwise;
 
 	json_lights = cJSON_GetObjectItem(ctx->json, JSON_LIGHTS);
 	if (!json_lights) {
@@ -397,24 +372,55 @@ int LoadConfig(context_s *ctx)
 			goto EXIT2;
 		}
 
-		json_name      = cJSON_GetObjectItem(json_light, JSON_NAME);
-		json_mac       = cJSON_GetObjectItem(json_light, JSON_MAC);
-		json_topic_pub = cJSON_GetObjectItem(json_light, JSON_TOPIC_PUB);
-		json_topic_sub = cJSON_GetObjectItem(json_light, JSON_TOPIC_SUB);
-		if ((!json_name || !json_mac || !json_topic_pub || !json_topic_sub) || \
-				(json_name->type != cJSON_String || \
-					json_mac->type != cJSON_String || \
-					json_topic_pub->type != cJSON_String || \
-					json_topic_sub->type != cJSON_String)) {
+		json_id         = cJSON_GetObjectItem(json_light, JSON_ID);
+		json_name       = cJSON_GetObjectItem(json_light, JSON_NAME);
+		json_valid       = cJSON_GetObjectItem(json_light, JSON_VALID);
+		json_led        = cJSON_GetObjectItem(json_light, JSON_LED);
+		json_temp          = cJSON_GetObjectItem(json_light, JSON_TEMPERATURE);
+		json_rssi             = cJSON_GetObjectItem(json_light, JSON_RSSI);
+		json_clkwise      = cJSON_GetObjectItem(json_light, JSON_CLKWISE);
+		json_cntclkwise = cJSON_GetObjectItem(json_light, JSON_CNTCLKWISE);
+		if ((!json_name || !json_valid || !json_led || !json_temp || !json_rssi || !json_clkwise || !json_cntclkwise) || \
+				(
+					json_name->type != cJSON_String || \
+					json_valid->type != cJSON_String || \
+					json_led->type != cJSON_String || \
+					json_temp->type != cJSON_String || \
+					json_rssi->type != cJSON_String || \
+					json_clkwise->type != cJSON_String || \
+					json_cntclkwise->type != cJSON_String)) {
 			fprintf(cgiOut, "Error get name and topic<BR><HR>\n");
 			goto EXIT2;
 		}
 
-		(*ctx->lights)[i].name      = json_name->valuestring;
-		(*ctx->lights)[i].mac       = json_mac->valuestring;
-		(*ctx->lights)[i].topic_pub = json_topic_pub->valuestring;
-		(*ctx->lights)[i].topic_sub = json_topic_sub->valuestring;
-		(*ctx->lights)[i].status    = LIGHT_OFFLINE;
+		(*ctx->lights)[i].id               = json_id->valuestring;
+		(*ctx->lights)[i].name             = json_name->valuestring;
+		(*ctx->lights)[i].valid             = json_valid->valuestring;
+		(*ctx->lights)[i].led              = json_led->valuestring;
+		(*ctx->lights)[i].temperature      = json_temp->valuestring;
+		(*ctx->lights)[i].rssi             = json_rssi->valuestring;
+		(*ctx->lights)[i].clockwise        = json_clkwise->valuestring;
+		(*ctx->lights)[i].counterclockwise = json_cntclkwise->valuestring;
+
+		fprintf(cgiOut, "temp=%s\n", (*ctx->lights)[i].temperature);
+
+		if (atoi(json_led->valuestring))
+			(*ctx->lights)[i].status = LIGHT_ON;
+		else
+			(*ctx->lights)[i].status = LIGHT_OFF;
+
+		if (!atoi(json_valid->valuestring))
+			(*ctx->lights)[i].status = LIGHT_OFFLINE;
+
+		if (atoi(json_clkwise->valuestring))
+			(*ctx->lights)[i].status1 = LIGHT_CLKWISE_ON;
+		else
+			(*ctx->lights)[i].status1 = LIGHT_CLKWISE_OFF;
+
+		if (atoi(json_cntclkwise->valuestring))
+			(*ctx->lights)[i].status2 = LIGHT_CNTCLKWISE_ON;
+		else
+			(*ctx->lights)[i].status2 = LIGHT_CNTCLKWISE_OFF;
 	}
 
 	return 0;
@@ -441,13 +447,13 @@ void FreeConfig(context_s *ctx)
 int ReloadConfig(context_s *ctx)
 {
 	FreeConfig(ctx);
-	return LoadConfig(ctx);	
+	return LoadConfig(ctx);
 }
 
-int LightAdd(context_s *ctx, char *name, char *mac)
+int LightAdd(context_s *ctx, char *name, char *led, char *temp, char *rssi, char *clkwise, char *cntclkwise)
 {
 	cJSON *json_lights, *json_light;
-
+	char id[4] = {0};
 	json_lights = cJSON_GetObjectItem(ctx->json, "lights");
 	if (!json_lights) {
 		fprintf(cgiOut, "Error cJSON_GetObjectItem lights<BR><HR>\n");
@@ -460,10 +466,14 @@ int LightAdd(context_s *ctx, char *name, char *mac)
 		goto EXIT;
 	}
 
-	if (!cJSON_AddStringToObject(json_light, JSON_NAME, name) || \
-		!cJSON_AddStringToObject(json_light, JSON_MAC, mac) || \
-		!cJSON_AddStringToObject(json_light, JSON_TOPIC_PUB, Topics(TOPIC_CONTROL, mac)) || \
-		!cJSON_AddStringToObject(json_light, JSON_TOPIC_SUB, Topics(TOPIC_REPORT, mac))) {
+	sprintf(id, "%d", ctx->light_num + 1);
+	if (!cJSON_AddStringToObject(json_light, JSON_ID, id) || \
+		!cJSON_AddStringToObject(json_light, JSON_NAME, name) || \
+		!cJSON_AddStringToObject(json_light, JSON_LED, led) || \
+		!cJSON_AddStringToObject(json_light, JSON_TEMPERATURE, temp) || \
+		!cJSON_AddStringToObject(json_light, JSON_RSSI, rssi) || \
+		!cJSON_AddStringToObject(json_light, JSON_CLKWISE, clkwise) || \
+		!cJSON_AddStringToObject(json_light, JSON_CNTCLKWISE, cntclkwise)) {
 		fprintf(cgiOut, "Error cJSON_AddStringToObject<BR><HR>\n");
 		goto EXIT1;
 	}
@@ -494,6 +504,7 @@ EXIT:
 	return -1;
 }
 
+#if 0
 void ParseReport(void *userdata, const char *report)
 {
 	light_s *light = userdata;
@@ -516,7 +527,7 @@ void ParseReport(void *userdata, const char *report)
 			}
 			json_temp = cJSON_GetObjectItem(json_params, "temp");
 			if (json_temp) {
-				light->temp = json_temp->valuedouble;
+				light->temperature = json_temp->valuedouble;
 			}
 			json_hum = cJSON_GetObjectItem(json_params, "hum");
 			if (json_hum) {
@@ -526,46 +537,63 @@ void ParseReport(void *userdata, const char *report)
 			if (json_uv) {
 				light->uv = json_uv->valueint;
 			}
-			
+
 			}
 		cJSON_Delete(json_report);
 	}
 
 	return;
 }
+#endif
 
 char *Names(flag_e flag, int num)
 {
 	static char name[NAME_LEN+1];
 
-	if (flag == LIGHT_OFF)
-		snprintf(name, NAME_LEN, "Off%d", num);
-	else if (flag == LIGHT_ON)
-		snprintf(name, NAME_LEN, "On%d", num);
-	else if (flag == LIGHT_ALL_OFF)
-		return "OffAll";
-	else if (flag == LIGHT_ALL_ON)
-		return "OnAll";
-	else if (flag == LIGHT_CONFIG)
-		return "Config";
-	else if (flag == LIGHT_REFRESH)
-		return "Refresh";
-	else if (flag == LIGHT_ADD)
-		return "Add";
-	else if (flag == LIGHT_DELETE)
-		snprintf(name, NAME_LEN, "Delete%d", num);
-	else if (flag == LIGHT_BACK)
-		return "Back";
-	else if (flag == LIGHT_NAME)
-		return "Name";
-	else if (flag == LIGHT_MAC)
-		return "Mac";
-	else
-		name[0] = '\0';
-
+	switch (flag) {
+		case LIGHT_OFF:
+		case LIGHT_CLKWISE_OFF:
+		case LIGHT_CNTCLKWISE_OFF:
+			snprintf(name, NAME_LEN, "Off%d", num);
+			break;
+		case LIGHT_ON:
+		case LIGHT_CLKWISE_ON:
+		case LIGHT_CNTCLKWISE_ON:
+			snprintf(name, NAME_LEN, "On%d", num);
+			break;
+		case LIGHT_ALL_OFF:
+			return "OffAll";
+		case LIGHT_ALL_ON:
+			return "OnAll";
+		case LIGHT_CONFIG:
+			return "Config";
+		case LIGHT_REFRESH:
+			return "Refresh";
+		case LIGHT_ADD:
+			return "Add";
+		case LIGHT_DELETE:
+			snprintf(name, NAME_LEN, "Delete%d", num);
+			break;
+		case LIGHT_BACK:
+			return "Back";
+		case LIGHT_NAME:
+			return "Name";
+		case LIGHT_LED:
+			return "LED";
+		case LIGHT_TEMP:
+			return "Temperature";
+		case LIGHT_RSSI:
+			return "RSSI";
+		case LIGHT_CLKWISE:
+			return "Clockwise";
+		case LIGHT_CNTCLKWISE:
+			return "Counterclockwise";
+	}
+	name[0] = '\0';
 	return name;
 }
 
+#if 0
 char *Topics(topic_e flag, char *mac)
 {
 	static char topic[MQTT_TOPIC_LEN];
@@ -579,6 +607,7 @@ char *Topics(topic_e flag, char *mac)
 
 	return topic;
 }
+#endif
 
 char *Commands(command_e cmd)
 {
@@ -600,25 +629,14 @@ char *Commands(command_e cmd)
 void ShowStatus(context_s *ctx)
 {
 	int i;
-	int allOffline = 1;
-
-	for (i=0; i<ctx->light_num; i++) 
-		if((*ctx->lights)[i].status != LIGHT_OFFLINE) {
-			allOffline = 0;
-			break;
-		}
-	
 	fprintf(cgiOut, "<!-- 2.0: multipart/form-data is required for file uploads. -->");
 	fprintf(cgiOut, "<form method=\"POST\" enctype=\"multipart/form-data\" ");
 	fprintf(cgiOut, "	action=\"");
 	cgiValueEscape(cgiScriptName);
 	fprintf(cgiOut, "\">\n");
 	fprintf(cgiOut, "<p>\n");
-	fprintf(cgiOut, "<input type=\"submit\" name=\"%s\" value=\"Configure\">\n", Names(LIGHT_CONFIG, 0));
-	fprintf(cgiOut, "<input type=\"submit\" name=\"%s\" value=\"Refresh\">\n", Names(LIGHT_REFRESH, 0));
 	fprintf(cgiOut, "<table border=\"0\" cellpadding=\"5\">\n");
-	fprintf(cgiOut, "<tr align=\"center\"> <th>ID</th>  <th>Name</th> <th>Light</th> %s </tr>\n", 
-										allOffline==0?"<th>Temperature</th> <th>Humidity</th> <th>Ultraviolet </th>":"\0");
+	fprintf(cgiOut, "<tr align=\"center\"> <th>ID</th>  <th>Name</th> <th>LED</th> <th>Temperature</th> <th>RSSI</th> <th>Clockwise </th> <th>Countercslockwise </th> </tr>\n");
 	for (i=0; i<ctx->light_num; i++) {
 		fprintf(cgiOut, "<tr align=\"center\">\n");
 		fprintf(cgiOut, "<td>%d</td> <td>%s</td>\n", i+1, (*ctx->lights)[i].name);
@@ -630,12 +648,21 @@ void ShowStatus(context_s *ctx)
 			fprintf(cgiOut, "<td>%s</td>\n", status[(*ctx->lights)[i].status]);
 			continue;
 		}
-		fprintf(cgiOut, "<td>%.2f</td> <td>%d</td> <td>%d</td>\n", \
-											(*ctx->lights)[i].temp, (*ctx->lights)[i].hum, (*ctx->lights)[i].uv);
+		//fprintf(cgiOut, "<td>%s</td> <td>%s</td> <td>%s</td> <td>%s</td>\n",
+		//									(*ctx->lights)[i].temperature, (*ctx->lights)[i].rssi, (*ctx->lights)[i].clockwise, (*ctx->lights)[i].counterclockwise);
+		fprintf(cgiOut, "<td>%s</td> <td>%s</td>\n", \
+											(*ctx->lights)[i].temperature, (*ctx->lights)[i].rssi);
+
+		if ((*ctx->lights)[i].status1 == LIGHT_CLKWISE_ON) {
+			fprintf(cgiOut, "<td>%s <input type=\"submit\" name=\"%s\" value=\"Off\"> </td>\n", status[(*ctx->lights)[i].status1], Names(LIGHT_CLKWISE, i));
+		} else if ((*ctx->lights)[i].status1 == LIGHT_CLKWISE_OFF) {
+			fprintf(cgiOut, "<td>%s <input type=\"submit\" name=\"%s\" value=\"On\"> </td>\n", status[(*ctx->lights)[i].status1], Names(LIGHT_CLKWISE, i));
+		}
+
 	}
 	fprintf(cgiOut, "</table>\n");
 	fprintf(cgiOut, "</form>\n");
-	//fprintf(cgiOut, "<meta http-equiv=\"refresh\" content=\"2\">\n");
+	fprintf(cgiOut, "<meta http-equiv=\"refresh\" content=\"2\">\n");
 }
 
 void ShowConfig(context_s *ctx)
@@ -650,16 +677,20 @@ void ShowConfig(context_s *ctx)
 	fprintf(cgiOut, "<p>\n");
 	fprintf(cgiOut, "<input type=\"submit\" name=\"%s\" value=\"<--  Back\">\n", Names(LIGHT_BACK, 0));
 	fprintf(cgiOut, "<table border=\"0\" cellpadding=\"5\">\n");
-	fprintf(cgiOut, "<tr align=\"left\"> <th>ID</th>  <th>Name</th> <th>Mac</th> <th>Action</th> </tr>\n");
+	fprintf(cgiOut, "<tr align=\"left\"> <th>ID</th>  <th>Name</th> <th>LED</th> <th>Temperature</th> <th>RSSI</th> <th>Clockwise</th> <th>Counterclockwise</th> <th>Action</th> </tr>\n");
 	for (i=0; i<ctx->light_num; i++) {
 		fprintf(cgiOut, "<tr align=\"left\">\n");
-		fprintf(cgiOut, "<td>%d</td> <td>%s</td> <td>%s</td>\n", i+1, (*ctx->lights)[i].name, (*ctx->lights)[i].mac);
+		fprintf(cgiOut, "<td>%d</td> <td>%s</td> <td>%s</td>\n", i+1, (*ctx->lights)[i].name, (*ctx->lights)[i].led);
 		fprintf(cgiOut, "<td><input type=\"submit\" name=\"%s\" value=\"Delete\"></td>\n", Names(LIGHT_DELETE, i));
 		fprintf(cgiOut, "</tr>\n");
 	}
 	fprintf(cgiOut, "<tr align=\"left\"> <td></td>\n");
 	fprintf(cgiOut, "<td><input type=\"text\" name=\"%s\" size=\"6\" maxlength=\"%d\"></td>\n", Names(LIGHT_NAME, 0), JSON_NAME_LEN);
-	fprintf(cgiOut, "<td><input type=\"text\" name=\"%s\" size=\"12\" maxlength=\"%d\"></td>\n", Names(LIGHT_MAC, 0), JSON_MAC_LEN);
+	fprintf(cgiOut, "<td><input type=\"text\" name=\"%s\" size=\"12\" maxlength=\"%d\"></td>\n", Names(LIGHT_LED, 0), JSON_NAME_LEN);
+	fprintf(cgiOut, "<td><input type=\"text\" name=\"%s\" size=\"12\" maxlength=\"%d\"></td>\n", Names(LIGHT_TEMP, 0), JSON_NAME_LEN);
+	fprintf(cgiOut, "<td><input type=\"text\" name=\"%s\" size=\"12\" maxlength=\"%d\"></td>\n", Names(LIGHT_RSSI, 0), JSON_NAME_LEN);
+	fprintf(cgiOut, "<td><input type=\"text\" name=\"%s\" size=\"12\" maxlength=\"%d\"></td>\n", Names(LIGHT_CLKWISE, 0), JSON_NAME_LEN);
+	fprintf(cgiOut, "<td><input type=\"text\" name=\"%s\" size=\"12\" maxlength=\"%d\"></td>\n", Names(LIGHT_CNTCLKWISE, 0), JSON_NAME_LEN);
 	fprintf(cgiOut, "<td><input type=\"submit\" name=\"%s\" value=\"Add\"></td>\n", Names(LIGHT_ADD, 0));
 	fprintf(cgiOut, "</tr>\n");
 	fprintf(cgiOut, "</table>\n");
