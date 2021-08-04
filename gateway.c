@@ -19,12 +19,13 @@ typedef unsigned short ushort;
 typedef unsigned int   uint;
 typedef unsigned long  ulong;
 
-#define CONFIG_FILE     "lights.json"
-#define CONFIG_FILE_SWP "lights.json.swp"
+#define CONFIG_FILE     "/tmp/lights.json"
+#define CONFIG_FILE_SWP "/tmp/lights.json.swp"
 
-#define NAME_LEN 10
+#define NAME_LEN 15
 
 #define JSON_LIGHTS    "lights"
+#define JSON_WEBUPDA        "webupda"
 #define JSON_ID        "id"
 #define JSON_NAME		   "name"
 #define JSON_VALID		   "valid"
@@ -39,6 +40,13 @@ typedef unsigned long  ulong;
 char *status[] = {
 	"Off",
 	"On",
+	"Offline",
+	"Error"
+};
+
+char *status1[] = {
+	"0",
+	"1",
 	"Offline",
 	"Error"
 };
@@ -92,6 +100,24 @@ typedef struct light_t {
 	int status2;
 } light_s;
 
+typedef enum devitem_t {
+	DEV_ID,
+	DEV_NAME,
+	DEV_VALID,
+	DEV_LED,
+	DEV_TEMP,
+	DEV_RSSI,
+	DEV_CLKWS,
+	DEV_CNTCLKWS
+} devitem_e;
+
+typedef struct updadev_t {
+	int i;  //array index
+	int webupda;
+	devitem_e updaitem;
+	char value[JSON_NAME_LEN+1];
+} updadev_s;
+
 typedef struct context_t {
 	int us;
 	cJSON *json;
@@ -108,8 +134,6 @@ cJSON *OpenJson(char *file);
 void CloseJson(cJSON *json);
 int SaveJson(char *file, cJSON *json);
 int LoadConfig(context_s *ctx);
-void FreeConfig(context_s *ctx);
-int ReloadConfig(context_s *ctx);
 void ParseReport(void *userdata, const char *report);
 int LightAdd(context_s *ctx, char *name, char *led, char *temp, char *rssi, char *clkwise, char *cntclkwise);
 int LightDelete(context_s *ctx, int num);
@@ -117,7 +141,7 @@ char *Names(flag_e flag, int num);
 char *Topics(topic_e flag, char *mac);
 char *Commands(command_e cmd);
 void ShowStatus(context_s *ctx);
-void ShowConfig(context_s *ctx);
+void UpdateJson(updadev_s* upda);
 
 static int Timeout(struct timespec *ts, int ms)
 {
@@ -136,6 +160,8 @@ int cgiMain() {
 	page_e pageIndex = PAGE_STATUS;
 	struct timespec ts1, ts2, ts;
 	context_s ctx = {0};
+	updadev_s updadev;
+	memset(&updadev, 0 , sizeof(updadev_s));
 
 	clock_gettime(CLOCK_MONOTONIC, &ts1);
 
@@ -159,47 +185,52 @@ int cgiMain() {
 		goto EXIT1;
 	}
 
-	/* If a submit button has already been clicked, act on the
-		submission of the form. */
-	/* Check config buttons */
-	if (cgiFormSubmitClicked(Names(LIGHT_CONFIG, 0)) == cgiFormSuccess) {
-		pageIndex = PAGE_CONFIG;
-	} else if (cgiFormSubmitClicked(Names(LIGHT_ADD, 0)) == cgiFormSuccess) {
-		char name[JSON_NAME_LEN+1];
-		char led[JSON_NAME_LEN+1];
-		char temp[JSON_NAME_LEN+1];
-		char rssi[JSON_NAME_LEN+1];
-		char clkwise[JSON_NAME_LEN+1];
-		char cntclkwise[JSON_NAME_LEN+1];
-
-		cgiFormString(Names(LIGHT_NAME, 0), name, JSON_NAME_LEN+1);
-		cgiFormString(Names(LIGHT_LED, 0), led, JSON_NAME_LEN+1);
-		cgiFormString(Names(LIGHT_TEMP, 0), temp, JSON_NAME_LEN+1);
-		cgiFormString(Names(LIGHT_RSSI, 0), rssi, JSON_NAME_LEN+1);
-		cgiFormString(Names(LIGHT_CLKWISE, 0), clkwise, JSON_NAME_LEN+1);
-		cgiFormString(Names(LIGHT_CNTCLKWISE, 0), cntclkwise, JSON_NAME_LEN+1);
-		if (strlen(name) && strlen(led) && strlen(temp) && strlen(rssi) && strlen(clkwise) && strlen(cntclkwise)) {
-			LightAdd(&ctx, name, led, temp, rssi, clkwise, cntclkwise);
-			SaveJson(CONFIG_FILE, ctx.json);
-			ReloadConfig(&ctx);
+	/* Check status buttons */
+	for (i=0; i<ctx.light_num; i++) {
+		updadev.i = i;
+		if (cgiFormSubmitClicked(Names(LIGHT_ON, i)) == cgiFormSuccess) {
+			updadev.updaitem = DEV_LED;
+			updadev.webupda = 1;
+			strncpy(updadev.value, "1\0", 2);
+			UpdateJson(&updadev);
+			pageIndex = PAGE_STATUS;
+			break;
+		} else if (cgiFormSubmitClicked(Names(LIGHT_OFF, i)) == cgiFormSuccess) {
+			updadev.updaitem = DEV_LED;
+			updadev.webupda = 1;
+			strncpy(updadev.value, "0\0", 2);
+			UpdateJson(&updadev);
+			pageIndex = PAGE_STATUS;
+			break;
+		} else if (cgiFormSubmitClicked(Names(LIGHT_CLKWISE_ON, i)) == cgiFormSuccess) {
+			updadev.updaitem = DEV_CLKWS;
+			updadev.webupda = 2;
+			strncpy(updadev.value, "1\0", 2);
+			UpdateJson(&updadev);
+			pageIndex = PAGE_STATUS;
+			break;
+		} else if (cgiFormSubmitClicked(Names(LIGHT_CLKWISE_OFF, i)) == cgiFormSuccess) {
+			updadev.updaitem = DEV_CLKWS;
+			updadev.webupda = 2;
+			strncpy(updadev.value, "0\0", 2);
+			UpdateJson(&updadev);
+			pageIndex = PAGE_STATUS;
+			break;
+		} else if (cgiFormSubmitClicked(Names(LIGHT_CNTCLKWISE_ON, i)) == cgiFormSuccess) {
+			updadev.updaitem = DEV_CNTCLKWS;
+			updadev.webupda = 3;
+			strncpy(updadev.value, "1\0", 2);
+			UpdateJson(&updadev);
+			pageIndex = PAGE_STATUS;
+			break;
+		} else if (cgiFormSubmitClicked(Names(LIGHT_CNTCLKWISE_OFF, i)) == cgiFormSuccess) {
+			updadev.updaitem = DEV_CNTCLKWS;
+			updadev.webupda = 3;
+			strncpy(updadev.value, "0\0", 2);
+			UpdateJson(&updadev);
+			pageIndex = PAGE_STATUS;
+			break;
 		}
-		pageIndex = PAGE_CONFIG;
-	} else {
-		for (i=0; i<ctx.light_num; i++) {
-			if (cgiFormSubmitClicked(Names(LIGHT_DELETE, i)) == cgiFormSuccess) {
-				LightDelete(&ctx, i);
-				SaveJson(CONFIG_FILE, ctx.json);
-				ReloadConfig(&ctx);
-				pageIndex = PAGE_CONFIG;
-				break;
-			}
-		}
-	}
-
-	/* Show the config page */
-	if (pageIndex == PAGE_CONFIG) {
-		ShowConfig(&ctx);
-		goto EXIT2;
 	}
 
 	clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -232,8 +263,6 @@ int cgiMain() {
 		ShowStatus(&ctx);
 	}
 
-EXIT2:
-	FreeConfig(&ctx);
 EXIT1:
 	CloseJson(ctx.json);
 EXIT:
@@ -307,6 +336,139 @@ EXIT:
 	return json;
 }
 
+void UpdateJson(updadev_s* upda)
+{
+	cJSON *json, *json_light, *json_array_ori, *json_array,*json_id, *json_name, *json_valid, *json_led, *json_temp, *json_rssi, *json_clkwise, *json_cntclkwise;
+	char webupda[JSON_NAME_LEN+1];
+	char id[JSON_NAME_LEN+1];
+	char name[JSON_NAME_LEN+1];
+	char valid[JSON_NAME_LEN+1];
+	char led[JSON_NAME_LEN+1];
+	char temp[JSON_NAME_LEN+1];
+	char rssi[JSON_NAME_LEN+1];
+	char clkwise[JSON_NAME_LEN+1];
+	char cntclkwise[JSON_NAME_LEN+1];
+
+	json = OpenJson(CONFIG_FILE);
+	json_light = cJSON_GetObjectItem(json, "lights");
+	if (!json_light) {
+		fprintf(cgiOut, "ERROR get json first node\n");
+		CloseJson(json);
+		return;
+	}
+
+
+	json_array_ori = cJSON_GetArrayItem(json_light, upda->i);
+	if (!json_array_ori) {
+		fprintf(cgiOut, "Error cJSON_GetArrayItem %d\n<BR><HR>\n", upda->i);
+		return;
+	}
+
+	json_id         = cJSON_GetObjectItem(json_array_ori, JSON_ID);
+	json_name       = cJSON_GetObjectItem(json_array_ori, JSON_NAME);
+	json_valid       = cJSON_GetObjectItem(json_array_ori, JSON_VALID);
+	json_led        = cJSON_GetObjectItem(json_array_ori, JSON_LED);
+	json_temp          = cJSON_GetObjectItem(json_array_ori, JSON_TEMPERATURE);
+	json_rssi             = cJSON_GetObjectItem(json_array_ori, JSON_RSSI);
+	json_clkwise      = cJSON_GetObjectItem(json_array_ori, JSON_CLKWISE);
+	json_cntclkwise = cJSON_GetObjectItem(json_array_ori, JSON_CNTCLKWISE);
+	if ((!json_name || !json_valid || !json_led || !json_temp || !json_rssi || !json_clkwise || !json_cntclkwise) || \
+			(
+				json_name->type != cJSON_String || \
+				json_valid->type != cJSON_String || \
+				json_led->type != cJSON_String || \
+				json_temp->type != cJSON_String || \
+				json_rssi->type != cJSON_String || \
+				json_clkwise->type != cJSON_String || \
+				json_cntclkwise->type != cJSON_String)) {
+		fprintf(cgiOut, "Error get name and topic<BR><HR>\n");
+		return;
+	}
+
+	snprintf(webupda, JSON_NAME_LEN, "%d", upda->webupda);
+
+	memcpy(id, json_id->valuestring, strlen(json_id->valuestring));
+	id[strlen(json_id->valuestring)] = '\0';
+
+	memcpy(name, json_name->valuestring, strlen(json_name->valuestring));
+	name[strlen(json_name->valuestring)] = '\0';
+
+	memcpy(valid, json_valid->valuestring, strlen(json_valid->valuestring));
+	valid[strlen(json_valid->valuestring)] = '\0';
+
+	memcpy(led, json_led->valuestring, strlen(json_led->valuestring));
+	led[strlen(json_led->valuestring)] = '\0';
+
+	memcpy(temp, json_temp->valuestring, strlen(json_temp->valuestring));
+	temp[strlen(json_temp->valuestring)] = '\0';
+
+	memcpy(rssi, json_rssi->valuestring, strlen(json_rssi->valuestring));
+	rssi[strlen(json_rssi->valuestring)] = '\0';
+
+	memcpy(clkwise, json_clkwise->valuestring, strlen(json_clkwise->valuestring));
+	clkwise[strlen(json_clkwise->valuestring)] = '\0';
+
+	memcpy(cntclkwise, json_cntclkwise->valuestring, strlen(json_cntclkwise->valuestring));
+	cntclkwise[strlen(json_cntclkwise->valuestring)] = '\0';
+
+	switch (upda->updaitem) {
+		case DEV_ID:
+			strncpy(id, upda->value, strlen(upda->value));
+			break;
+		case DEV_NAME:
+			strncpy(name, upda->value, strlen(upda->value));
+			break;
+		case DEV_VALID:
+			strncpy(valid, upda->value, strlen(upda->value));
+			break;
+		case DEV_LED:
+			strncpy(led, upda->value, strlen(upda->value));
+			break;
+		case DEV_TEMP:
+			strncpy(temp, upda->value, strlen(upda->value));
+			break;
+		case DEV_RSSI:
+			strncpy(rssi, upda->value, strlen(upda->value));
+			break;
+		case DEV_CLKWS:
+			strncpy(clkwise, upda->value, strlen(upda->value));
+			break;
+		case DEV_CNTCLKWS:
+			strncpy(cntclkwise, upda->value, strlen(upda->value));
+			break;
+		default:
+			break;
+	}
+
+	json_array = cJSON_CreateObject();
+	if (!json_array) {
+		fprintf(cgiOut, "ERROR create object json\n");
+		CloseJson(json);
+		return;
+	}
+	//name[strlen(name)] = '\0';
+
+	//printf("temp:%s, len:%d\n", temp, strlen(temp));
+	//printf("rssi:%s, len:%d\n", rssi, strlen(rssi));
+	if (!cJSON_AddStringToObject(json_array, JSON_WEBUPDA, webupda) || \
+		!cJSON_AddStringToObject(json_array, JSON_ID, id) || \
+		!cJSON_AddStringToObject(json_array, JSON_VALID, valid) || \
+		!cJSON_AddStringToObject(json_array, JSON_NAME, name) || \
+		!cJSON_AddStringToObject(json_array, JSON_LED, led) || \
+		!cJSON_AddStringToObject(json_array, JSON_TEMPERATURE, temp) || \
+		!cJSON_AddStringToObject(json_array, JSON_RSSI, rssi) || \
+		!cJSON_AddStringToObject(json_array, JSON_CLKWISE, clkwise) || \
+		!cJSON_AddStringToObject(json_array, JSON_CNTCLKWISE, cntclkwise)) {
+		fprintf(cgiOut, "ERROR add string to json\n");
+		CloseJson(json);
+		return;
+	}
+
+	cJSON_ReplaceItemInArray(json_light, upda->i, json_array);
+	SaveJson(CONFIG_FILE, json);
+	CloseJson(json);
+}
+
 void CloseJson(cJSON *json)
 {
 	if (json)
@@ -319,6 +481,7 @@ int SaveJson(char *file, cJSON *json)
 {
 	FILE *fp;
 	int ret;
+	//struct stat state;
 
 	fp=fopen(file, "w");
 	if (!fp) {
@@ -331,8 +494,17 @@ int SaveJson(char *file, cJSON *json)
 	if (ret < 0) {
 		fprintf(cgiOut, "Error fpust %s for save ret=%d<BR><HR>\n", file, ret);
 		return -1;
-	} else
-		return 0;
+	}
+
+#if 0
+	if (0 > stat(CONFIG_FILE, &state)) {
+		printf("stat json error\n");
+		return -1;
+	}
+	printf("st_mtime:%ld\n", state.st_mtime);
+#endif
+
+	return 0;
 }
 
 int LoadConfig(context_s *ctx)
@@ -380,8 +552,8 @@ int LoadConfig(context_s *ctx)
 		json_rssi             = cJSON_GetObjectItem(json_light, JSON_RSSI);
 		json_clkwise      = cJSON_GetObjectItem(json_light, JSON_CLKWISE);
 		json_cntclkwise = cJSON_GetObjectItem(json_light, JSON_CNTCLKWISE);
-		if ((!json_name || !json_valid || !json_led || !json_temp || !json_rssi || !json_clkwise || !json_cntclkwise) || \
-				(
+		if ((!json_id || !json_name || !json_valid || !json_led || !json_temp || !json_rssi || !json_clkwise || !json_cntclkwise) || \
+				(json_id->type != cJSON_String || \
 					json_name->type != cJSON_String || \
 					json_valid->type != cJSON_String || \
 					json_led->type != cJSON_String || \
@@ -401,8 +573,6 @@ int LoadConfig(context_s *ctx)
 		(*ctx->lights)[i].rssi             = json_rssi->valuestring;
 		(*ctx->lights)[i].clockwise        = json_clkwise->valuestring;
 		(*ctx->lights)[i].counterclockwise = json_cntclkwise->valuestring;
-
-		fprintf(cgiOut, "temp=%s\n", (*ctx->lights)[i].temperature);
 
 		if (atoi(json_led->valuestring))
 			(*ctx->lights)[i].status = LIGHT_ON;
@@ -433,133 +603,28 @@ EXIT:
 	return -1;
 }
 
-void FreeConfig(context_s *ctx)
-{
-	if (ctx->lights) {
-		free(ctx->lights);
-		ctx->lights = NULL;
-	}
-	ctx->light_num = 0;
-
-	return;
-}
-
-int ReloadConfig(context_s *ctx)
-{
-	FreeConfig(ctx);
-	return LoadConfig(ctx);
-}
-
-int LightAdd(context_s *ctx, char *name, char *led, char *temp, char *rssi, char *clkwise, char *cntclkwise)
-{
-	cJSON *json_lights, *json_light;
-	char id[4] = {0};
-	json_lights = cJSON_GetObjectItem(ctx->json, "lights");
-	if (!json_lights) {
-		fprintf(cgiOut, "Error cJSON_GetObjectItem lights<BR><HR>\n");
-		goto EXIT;
-	}
-
-	json_light = cJSON_CreateObject();
-	if (!json_light) {
-		fprintf(cgiOut, "Error cJSON_CreateObject<BR><HR>\n");
-		goto EXIT;
-	}
-
-	sprintf(id, "%d", ctx->light_num + 1);
-	if (!cJSON_AddStringToObject(json_light, JSON_ID, id) || \
-		!cJSON_AddStringToObject(json_light, JSON_NAME, name) || \
-		!cJSON_AddStringToObject(json_light, JSON_LED, led) || \
-		!cJSON_AddStringToObject(json_light, JSON_TEMPERATURE, temp) || \
-		!cJSON_AddStringToObject(json_light, JSON_RSSI, rssi) || \
-		!cJSON_AddStringToObject(json_light, JSON_CLKWISE, clkwise) || \
-		!cJSON_AddStringToObject(json_light, JSON_CNTCLKWISE, cntclkwise)) {
-		fprintf(cgiOut, "Error cJSON_AddStringToObject<BR><HR>\n");
-		goto EXIT1;
-	}
-
-	cJSON_AddItemToArray(json_lights, json_light);
-
-	return 0;
-EXIT1:
-	cJSON_Delete(json_light);
-EXIT:
-	return -1;
-}
-
-int LightDelete(context_s *ctx, int num)
-{
-	cJSON *json_lights = cJSON_GetObjectItem(ctx->json, "lights");
-
-	json_lights = cJSON_GetObjectItem(ctx->json, "lights");
-	if (!json_lights) {
-		fprintf(cgiOut, "Error cJSON_GetObjectItem lights<BR><HR>\n");
-		goto EXIT;
-	}
-
-	cJSON_DeleteItemFromArray(json_lights, num);
-
-	return 0;
-EXIT:
-	return -1;
-}
-
-#if 0
-void ParseReport(void *userdata, const char *report)
-{
-	light_s *light = userdata;
-	cJSON *json_report, *json_params, *json_light, *json_temp, *json_hum, *json_uv;
-
-	if (!report)
-		return;
-
-	light->status = LIGHT_ERROR;
-	json_report = cJSON_Parse(report);
-	if (json_report) {
-		json_params = cJSON_GetObjectItem(json_report, "params");
-		if (json_params) {
-			json_light = cJSON_GetObjectItem(json_params, "light_switch");
-			if (json_light) {
-				if (json_light->valueint == 1)
-					light->status = LIGHT_ON;
-				else if (json_light->valueint == 0)
-					light->status = LIGHT_OFF;
-			}
-			json_temp = cJSON_GetObjectItem(json_params, "temp");
-			if (json_temp) {
-				light->temperature = json_temp->valuedouble;
-			}
-			json_hum = cJSON_GetObjectItem(json_params, "hum");
-			if (json_hum) {
-				light->hum = json_hum->valueint;
-			}
-			json_uv = cJSON_GetObjectItem(json_params, "uv");
-			if (json_uv) {
-				light->uv = json_uv->valueint;
-			}
-
-			}
-		cJSON_Delete(json_report);
-	}
-
-	return;
-}
-#endif
-
 char *Names(flag_e flag, int num)
 {
 	static char name[NAME_LEN+1];
 
 	switch (flag) {
 		case LIGHT_OFF:
-		case LIGHT_CLKWISE_OFF:
-		case LIGHT_CNTCLKWISE_OFF:
 			snprintf(name, NAME_LEN, "Off%d", num);
 			break;
+		case LIGHT_CLKWISE_OFF:
+			snprintf(name, NAME_LEN, "Clkoff%d", num);
+			break;
+		case LIGHT_CNTCLKWISE_OFF:
+			snprintf(name, NAME_LEN, "Cckoff%d", num);
+			break;
 		case LIGHT_ON:
-		case LIGHT_CLKWISE_ON:
-		case LIGHT_CNTCLKWISE_ON:
 			snprintf(name, NAME_LEN, "On%d", num);
+			break;
+		case LIGHT_CLKWISE_ON:
+			snprintf(name, NAME_LEN, "Clkon%d", num);
+			break;
+		case LIGHT_CNTCLKWISE_ON:
+			snprintf(name, NAME_LEN, "Cckon%d", num);
 			break;
 		case LIGHT_ALL_OFF:
 			return "OffAll";
@@ -584,46 +649,14 @@ char *Names(flag_e flag, int num)
 			return "Temperature";
 		case LIGHT_RSSI:
 			return "RSSI";
-		case LIGHT_CLKWISE:
-			return "Clockwise";
-		case LIGHT_CNTCLKWISE:
-			return "Counterclockwise";
-	}
-	name[0] = '\0';
-	return name;
-}
-
-#if 0
-char *Topics(topic_e flag, char *mac)
-{
-	static char topic[MQTT_TOPIC_LEN];
-
-	if (flag == TOPIC_REPORT)
-		snprintf(topic, MQTT_TOPIC_LEN, MQTT_TOPIC_PATTERN, mac, MQTT_TOPIC_REPORT);
-	else if (flag == TOPIC_CONTROL)
-		snprintf(topic, MQTT_TOPIC_LEN, MQTT_TOPIC_PATTERN, mac, MQTT_TOPIC_CONTROL);
-	else
-		topic[0] = '\0';
-
-	return topic;
-}
-#endif
-
-char *Commands(command_e cmd)
-{
-	switch (cmd) {
-		case CMD_LIGHT_OFF:
-			return "{\"id\":\"1\",\"version\":\"1.0\",\"params\":{\"light_switch\":0,\"light_intensity\":88,\"led_r\":0,\"led_g\":0,\"led_b\":0}}";
-
-		case CMD_LIGHT_ON:
-			return "{\"id\":\"1\",\"version\":\"1.0\",\"params\":{\"light_switch\":1,\"light_intensity\":88,\"led_r\":0,\"led_g\":0,\"led_b\":0}}";
-
-		case CMD_STATUS:
-			return "{\"version\":\"1.0\",\"params\":{\"get_status\":1}}";
-
+		case LIGHT_OFFLINE:
+		case LIGHT_ERROR:
+			break;
 		default:
-			return "\0";
+			name[0] = '\0';
+			break;
 	}
+	return name;
 }
 
 void ShowStatus(context_s *ctx)
@@ -642,8 +675,10 @@ void ShowStatus(context_s *ctx)
 		fprintf(cgiOut, "<td>%d</td> <td>%s</td>\n", i+1, (*ctx->lights)[i].name);
 		if ((*ctx->lights)[i].status == LIGHT_ON) {
 			fprintf(cgiOut, "<td>%s <input type=\"submit\" name=\"%s\" value=\"Off\"> </td>\n", status[(*ctx->lights)[i].status], Names(LIGHT_OFF, i));
+
 		} else if ((*ctx->lights)[i].status == LIGHT_OFF) {
 			fprintf(cgiOut, "<td>%s <input type=\"submit\" name=\"%s\" value=\"On\"> </td>\n", status[(*ctx->lights)[i].status], Names(LIGHT_ON, i));
+
 		} else {
 			fprintf(cgiOut, "<td>%s</td>\n", status[(*ctx->lights)[i].status]);
 			continue;
@@ -654,45 +689,19 @@ void ShowStatus(context_s *ctx)
 											(*ctx->lights)[i].temperature, (*ctx->lights)[i].rssi);
 
 		if ((*ctx->lights)[i].status1 == LIGHT_CLKWISE_ON) {
-			fprintf(cgiOut, "<td>%s <input type=\"submit\" name=\"%s\" value=\"Off\"> </td>\n", status[(*ctx->lights)[i].status1], Names(LIGHT_CLKWISE, i));
+			fprintf(cgiOut, "<td>%s <input type=\"submit\" name=\"%s\" value=\"1\"> </td>\n", status1[0], Names(LIGHT_CLKWISE_OFF, i));
 		} else if ((*ctx->lights)[i].status1 == LIGHT_CLKWISE_OFF) {
-			fprintf(cgiOut, "<td>%s <input type=\"submit\" name=\"%s\" value=\"On\"> </td>\n", status[(*ctx->lights)[i].status1], Names(LIGHT_CLKWISE, i));
+			fprintf(cgiOut, "<td>%s <input type=\"submit\" name=\"%s\" value=\"0\"> </td>\n", status1[1], Names(LIGHT_CLKWISE_ON, i));
+		}
+
+		if ((*ctx->lights)[i].status2 == LIGHT_CNTCLKWISE_ON) {
+			fprintf(cgiOut, "<td>%s <input type=\"submit\" name=\"%s\" value=\"1\"> </td>\n", status1[0], Names(LIGHT_CNTCLKWISE_OFF, i));
+		} else if ((*ctx->lights)[i].status2 == LIGHT_CNTCLKWISE_OFF) {
+			fprintf(cgiOut, "<td>%s <input type=\"submit\" name=\"%s\" value=\"0\"> </td>\n", status1[1], Names(LIGHT_CNTCLKWISE_ON, i));
 		}
 
 	}
 	fprintf(cgiOut, "</table>\n");
 	fprintf(cgiOut, "</form>\n");
 	fprintf(cgiOut, "<meta http-equiv=\"refresh\" content=\"2\">\n");
-}
-
-void ShowConfig(context_s *ctx)
-{
-	int i;
-
-	fprintf(cgiOut, "<!-- 2.0: multipart/form-data is required for file uploads. -->");
-	fprintf(cgiOut, "<form method=\"POST\" enctype=\"multipart/form-data\" ");
-	fprintf(cgiOut, " action=\"");
-	cgiValueEscape(cgiScriptName);
-	fprintf(cgiOut, "\">\n");
-	fprintf(cgiOut, "<p>\n");
-	fprintf(cgiOut, "<input type=\"submit\" name=\"%s\" value=\"<--  Back\">\n", Names(LIGHT_BACK, 0));
-	fprintf(cgiOut, "<table border=\"0\" cellpadding=\"5\">\n");
-	fprintf(cgiOut, "<tr align=\"left\"> <th>ID</th>  <th>Name</th> <th>LED</th> <th>Temperature</th> <th>RSSI</th> <th>Clockwise</th> <th>Counterclockwise</th> <th>Action</th> </tr>\n");
-	for (i=0; i<ctx->light_num; i++) {
-		fprintf(cgiOut, "<tr align=\"left\">\n");
-		fprintf(cgiOut, "<td>%d</td> <td>%s</td> <td>%s</td>\n", i+1, (*ctx->lights)[i].name, (*ctx->lights)[i].led);
-		fprintf(cgiOut, "<td><input type=\"submit\" name=\"%s\" value=\"Delete\"></td>\n", Names(LIGHT_DELETE, i));
-		fprintf(cgiOut, "</tr>\n");
-	}
-	fprintf(cgiOut, "<tr align=\"left\"> <td></td>\n");
-	fprintf(cgiOut, "<td><input type=\"text\" name=\"%s\" size=\"6\" maxlength=\"%d\"></td>\n", Names(LIGHT_NAME, 0), JSON_NAME_LEN);
-	fprintf(cgiOut, "<td><input type=\"text\" name=\"%s\" size=\"12\" maxlength=\"%d\"></td>\n", Names(LIGHT_LED, 0), JSON_NAME_LEN);
-	fprintf(cgiOut, "<td><input type=\"text\" name=\"%s\" size=\"12\" maxlength=\"%d\"></td>\n", Names(LIGHT_TEMP, 0), JSON_NAME_LEN);
-	fprintf(cgiOut, "<td><input type=\"text\" name=\"%s\" size=\"12\" maxlength=\"%d\"></td>\n", Names(LIGHT_RSSI, 0), JSON_NAME_LEN);
-	fprintf(cgiOut, "<td><input type=\"text\" name=\"%s\" size=\"12\" maxlength=\"%d\"></td>\n", Names(LIGHT_CLKWISE, 0), JSON_NAME_LEN);
-	fprintf(cgiOut, "<td><input type=\"text\" name=\"%s\" size=\"12\" maxlength=\"%d\"></td>\n", Names(LIGHT_CNTCLKWISE, 0), JSON_NAME_LEN);
-	fprintf(cgiOut, "<td><input type=\"submit\" name=\"%s\" value=\"Add\"></td>\n", Names(LIGHT_ADD, 0));
-	fprintf(cgiOut, "</tr>\n");
-	fprintf(cgiOut, "</table>\n");
-	fprintf(cgiOut, "</form>\n");
 }
