@@ -672,7 +672,7 @@ void ShowStatus(context_s *ctx)
 	fprintf(cgiOut, "<tr align=\"center\"> <th>ID</th>  <th>Name</th> <th>LED</th> <th>Temperature</th> <th>RSSI</th> <th>Clockwise </th> <th>Countercslockwise </th> </tr>\n");
 	for (i=0; i<ctx->light_num; i++) {
 		fprintf(cgiOut, "<tr align=\"center\">\n");
-		fprintf(cgiOut, "<td>%d</td> <td>%s</td>\n", i+1, (*ctx->lights)[i].name);
+		fprintf(cgiOut, "<td>%d</td> <td>%s</td>\n", i, (*ctx->lights)[i].name);
 		if ((*ctx->lights)[i].status == LIGHT_ON) {
 			fprintf(cgiOut, "<td>%s <input type=\"submit\" name=\"%s\" value=\"Off\"> </td>\n", status[(*ctx->lights)[i].status], Names(LIGHT_OFF, i));
 
