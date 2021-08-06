@@ -19,6 +19,8 @@ typedef unsigned short ushort;
 typedef unsigned int   uint;
 typedef unsigned long  ulong;
 
+#define MCHPDEMO
+
 #define CONFIG_FILE     "/tmp/lights.json"
 #define CONFIG_FILE_SWP "/tmp/lights.json.swp"
 
@@ -169,7 +171,11 @@ int cgiMain() {
 	cgiHeaderContentType("text/html");
 	/* Top of the page */
 	fprintf(cgiOut, "<HTML><HEAD>\n");
+#ifdef MCHPDEMO
+	fprintf(cgiOut, "<IMG src=\"../mchplogo.png\" alt=\"logo\">\n");
+#else
 	fprintf(cgiOut, "<IMG src=\"../logo.png\" alt=\"logo\">\n");
+#endif
 	fprintf(cgiOut, "<TITLE>Mi-Wi Gateway</TITLE></HEAD>\n");
 	fprintf(cgiOut, "<BODY><H1>Mi-Wi IoT Control Center</H1>\n");
 
@@ -669,7 +675,11 @@ void ShowStatus(context_s *ctx)
 	fprintf(cgiOut, "\">\n");
 	fprintf(cgiOut, "<p>\n");
 	fprintf(cgiOut, "<table border=\"0\" cellpadding=\"5\">\n");
-	fprintf(cgiOut, "<tr align=\"center\"> <th>ID</th>  <th>Name</th> <th>LED</th> <th>Temperature</th> <th>RSSI</th> <th>Clockwise </th> <th>Countercslockwise </th> </tr>\n");
+#ifdef MCHPDEMO
+	fprintf(cgiOut, "<tr align=\"center\"> <th>ID</th>  <th>Name</th> <th>LED</th> <th>Temperature</th> <th>RSSI</th> <th>GPIO1 </th> <th>GPIO2 </th> </tr>\n");
+#else
+	fprintf(cgiOut, "<tr align=\"center\"> <th>ID</th>  <th>Name</th> <th>LED</th> <th>Temperature</th> <th>RSSI</th> <th>Forward </th> <th>Reverse </th> </tr>\n");
+#endif
 	for (i=0; i<ctx->light_num; i++) {
 		fprintf(cgiOut, "<tr align=\"center\">\n");
 		fprintf(cgiOut, "<td>%d</td> <td>%s</td>\n", i, (*ctx->lights)[i].name);
